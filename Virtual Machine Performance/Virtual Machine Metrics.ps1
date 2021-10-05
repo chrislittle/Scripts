@@ -1,4 +1,7 @@
-﻿# Set Date window to 28 days for data set
+﻿# Set proper subscription context
+set-azcontext -Subscription SubscriptionID
+
+# Set Date window to 28 days for data set
 $date = (Get-Date).AddDays(-28)
 
 # Set resource ID for VM

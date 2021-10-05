@@ -1,2 +1,2 @@
 # Azure PowerShell Scripts
-Repositry collection of Azure Powershell Scripts. 
+Repository collection of Azure Powershell Scripts. 
