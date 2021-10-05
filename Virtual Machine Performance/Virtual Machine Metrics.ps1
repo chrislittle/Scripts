@@ -2,7 +2,10 @@
 $date = (Get-Date).AddDays(-28)
 
 # Set resource ID for VM
-$id="INSERT RESOURCE ID"
+$VMName = "Azure VM Name"
+$VMResourceGroupName = "VM Resource Group Name"
+$VM = Get-AzVM -ResourceGroupName $VMResourceGroupName -Name $VMName
+$id = $VM.Id
 
 # Output 15 minute time grain for CPU Percentage, Uses average property
 $cpuoutput = Get-AzMetric -ResourceId $id -AggregationType Average -StartTime $date -TimeGrain 00:15:00 -MetricNames "Percentage CPU"
