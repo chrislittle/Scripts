@@ -1,3 +1,7 @@
+# Set proper subscription context
+set-azcontext -Subscription SubscriptionID
+
+# set variables
 $ResourceGroupName="ResourceGroupName"
 $LocationName="Azure Region"
 $keyVaultName="KeyVaultName"
