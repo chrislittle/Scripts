@@ -1,4 +1,5 @@
-# This script loops through all subscriptions the user has access to and outputs the list of Virtual Machines & their capabilities for supporting Encryption at Host
+# This script loops through all subscriptions the user has access to and outputs the list of Virtual Machines & their capabilities for supporting Encryption at Host.
+# The desired region will need to be modified to fit your needs.
 
 $outputCollection = @()
 $subscriptions=Get-AzSubscription
