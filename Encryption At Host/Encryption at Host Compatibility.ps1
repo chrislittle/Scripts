@@ -20,3 +20,6 @@ $outputCollection += New-Object PSObject -Property @{
     }
 }
 $outputCollection | Format-Table
+
+#optional export to CSV, uncomment if required
+# $outputCollection | Export-Csv -Path ./encryptionreport.csv
