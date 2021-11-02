@@ -39,4 +39,5 @@ Update-AzVM -VM $VM -ResourceGroupName $VMResourceGroupName -EncryptionAtHost $t
 New-AzDiskUpdateConfig -EncryptionType "EncryptionAtRestWithCustomerKey" -DiskEncryptionSetId $diskEncryptionSet.Id | Update-AzDisk -ResourceGroupName $VMResourceGroupName -DiskName $vmosdisk.name
 foreach($vmdatadisk in $vmdatadisks){
 New-AzDiskUpdateConfig -EncryptionType "EncryptionAtRestWithCustomerKey" -DiskEncryptionSetId $diskEncryptionSet.Id | Update-AzDisk -ResourceGroupName $VMResourceGroupName -DiskName $vmdatadisk.name}
+Start-AzVM -ResourceGroupName $VMResourceGroupName -Name $vmoutput.name
 }
