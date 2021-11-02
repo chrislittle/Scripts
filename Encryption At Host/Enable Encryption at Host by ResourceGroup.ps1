@@ -1,14 +1,15 @@
 ﻿# Initial Azure Encryption at Host script. Enables Encryption at Host on VM & updates the OS & Data Disks to SSE with CMK to the Disk Encryption Set
+# In this repo is a script to check Encryption At Host Compatibility ahead of any implementation.
 
 # Set proper subscription context
 set-azcontext -Subscription SubscriptionID
 
-# Set variables
+# Set resource group for encryption at host
 $VMResourceGroupName = "Azure VM Resource Group Name"
-$DESResourceGroupName = "Disk Encryption Set Resource Group Name"
 
-# Set Disk Encryption Set name for Servers in this run
+# et Disk Encryption Set name and Resource Group
 $diskEncryptionSetName = "Disk Encryption Set Name"
+$DESResourceGroupName = "Disk Encryption Set Resource Group Name"
 $diskEncryptionSet = Get-AzDiskEncryptionSet -ResourceGroupName $DESResourceGroupName -Name $diskEncryptionSetName
 
 # Get inventory & Confirm Report
@@ -18,10 +19,12 @@ foreach($serveritem in $serveritems){
 $VM = Get-AzVM -ResourceGroupName $serveritem.ResourceGroupName -Name $serveritem.name
 $vmname = $vm.Name
 $vmlocation = $vm.Location
+$vmrg = $vm.ResourceGroupName
 $vmsize = $vm.HardwareProfile.VmSize 
 $outputCollection += New-Object PSObject -Property @{
     Name = $vmname
     Location = $vmlocation
+    ResourceGroupName = $vmrg
     VMSize = $vmsize}
 }
 
