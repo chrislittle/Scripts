@@ -1,9 +1,9 @@
 # This script loops through all subscriptions the user has access to and outputs the list of Virtual Machines & their capabilities for supporting Encryption at Host
 
+$outputCollection = @()
 $subscriptions=Get-AzSubscription
 ForEach ($sub in $subscriptions){
 set-azcontext -Subscription $sub
-$outputCollection = @()
 $serveritems = Get-AzResource -ResourceType Microsoft.Compute/virtualMachines
 foreach($serveritem in $serveritems){
 $VM = Get-AzVM -ResourceGroupName $serveritem.ResourceGroupName -Name $serveritem.name
@@ -17,5 +17,6 @@ $outputCollection += New-Object PSObject -Property @{
     Location = $vmlocation
     VMSize = $vmsize
     EncryptionAtHostSupported = $checkencryptionathost.value}
-}
     }
+}
+$outputCollection | Format-Table
