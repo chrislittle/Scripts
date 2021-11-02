@@ -1,5 +1,4 @@
 # This script loops through all subscriptions the user has access to and outputs the list of Virtual Machines & their capabilities for supporting Encryption at Host.
-# The desired region will need to be modified to fit your needs.
 
 $outputCollection = @()
 $subscriptions=Get-AzSubscription
@@ -11,7 +10,7 @@ $VM = Get-AzVM -ResourceGroupName $serveritem.ResourceGroupName -Name $serverite
 $vmname = $vm.Name
 $vmlocation = $vm.Location
 $vmsize = $vm.HardwareProfile.VmSize
-$skudetails = Get-AzComputeResourceSku | Where-Object{$_.Name -eq $vmsize -and $_.Locations.Contains('northcentralus')}
+$skudetails = Get-AzComputeResourceSku | Where-Object{$_.Name -eq $vmsize} | Select-Object -first 1
 $checkencryptionathost = $skudetails.capabilities | Where-Object{$_.Name -eq 'EncryptionAtHostSupported'}
 $outputCollection += New-Object PSObject -Property @{
     Name = $vmname
