@@ -5,7 +5,7 @@
 set-azcontext -Subscription SubscriptionID
 
 # Import the CSV list of Virtual Machines. User must input the name of the CSV.
-$csvlist = import-csv ./vms.csv
+$csvlist = import-csv ./template.csv
 
 # Set Disk Encryption Set name and Resource Group
 $diskEncryptionSetName = "Disk Encryption Set Name"
