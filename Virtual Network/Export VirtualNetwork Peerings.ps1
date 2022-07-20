@@ -1,4 +1,6 @@
-﻿$outputCollection = @()
+﻿# This script loops through all subscriptions in an Azure AD tenant and outputs the virtual network peerings into CSV
+
+$outputCollection = @()
 $CurrentContext = Get-AzContext
 $Subscriptions = Get-AzSubscription -TenantId $CurrentContext.Tenant.Id
 ForEach ($sub in $subscriptions){
