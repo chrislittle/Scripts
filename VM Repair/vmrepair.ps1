@@ -10,8 +10,8 @@ $password = Read-Host "Please enter a password for the recovery VM" -AsSecureStr
 
 #generate random RG & VM recovery name
 $guid = [guid]::NewGuid().ToString()
-$randomStringVM = $failedvm + $guid.Substring(0, 2)
-$randomStringRG = $failedvmrg + $guid.Substring(0, 6)
+$randomStringVM = "rvm" + $guid.Substring(0, 10)
+$randomStringRG = "rrg" + $guid.Substring(0, 10)
 
 #Add VM repair extension
 az extension add -n vm-repair
