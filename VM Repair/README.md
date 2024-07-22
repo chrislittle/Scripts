@@ -1,7 +1,10 @@
 This set of scripts execute a VM repair for the recent CrowdStrike incident.  
 
 * [Version 1](https://github.com/chrislittle/Scripts/blob/main/VM%20Repair/vmrepair.ps1)
+Workaround for machines stuck in boot loop due to corrupt crowdstrike falcon sensor 2024-07-19 by removing corrupt crowdstrike files
+
 * [Version 2](https://github.com/chrislittle/Scripts/blob/main/VM%20Repair/vmrepair_v2.ps1)
+Workaround for machines stuck in boot loop due to corrupt crowdstrike falcon sensor 2024-07-19 by removing corrupt crowdstrike files, loading/unloading the registry hives, and removing regtrans-ms and txr.blf files under config\\TxR folder
 
 **The current version has limited features and requires the user input the VM, RG, Subscription ID for a single VM**  
 
