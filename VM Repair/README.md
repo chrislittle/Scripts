@@ -1,6 +1,6 @@
 This set of scripts execute a VM repair for the recent CrowdStrike incident.  
 
-* [Current Version:](https://github.com/chrislittle/Scripts/blob/main/VM%20Repair/vmrepair.ps1)
+* [Current Version/Updated 7-23-24 3:00 PM EST:](https://github.com/chrislittle/Scripts/blob/main/VM%20Repair/vmrepair.ps1)
 Workaround for machines stuck in boot loop due to corrupt crowdstrike falcon sensor 2024-07-19 by removing corrupt crowdstrike files
 
 
