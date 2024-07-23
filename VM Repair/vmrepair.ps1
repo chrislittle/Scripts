@@ -27,7 +27,7 @@ az vm repair create -g $failedvmrg -n $failedvm --repair-username $username --re
 Read-Host -Prompt "Press any key to Remove CrowdStrike Files...."
 
 #Remove CrowdStrike Files
-az vm repair run -g $failedvmrg -n $failedvm --run-id win-crowdstrike-fix-bootloop-v3 --run-on-repair --verbose
+az vm repair run -g $failedvmrg -n $failedvm --run-id win-crowdstrike-fix-bootloop --run-on-repair --verbose
 
 Read-Host -Prompt "Press any key to swap the repaired OS disk to the original VM...."
 
