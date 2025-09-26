@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourcePrefix": {
+      "value": "nginx-lb"
+    },
+    "location": {
+      "value": "Central US"
+    },
+    "vnetAddressPrefix": {
+      "value": "10.0.0.0/16"
+    },
+    "loadBalancerSubnetPrefix": {
+      "value": "10.0.1.0/24"
+    },
+    "containerSubnetPrefix": {
+      "value": "10.0.2.0/24"
+    },
+    "bastionSubnetPrefix": {
+      "value": "10.0.3.0/26"
+    },
+    "vmSubnetPrefix": {
+      "value": "10.0.4.0/24"
+    },
+    "vmAdminUsername": {
+      "value": "vmadmin"
+    },
+    "vmAdminPassword": {
+      "value": "P@ssw0rd123!"
+    },
+    "containerImage": {
+      "value": "mcr.microsoft.com/oss/nginx/nginx:1.15.5-alpine"
+    },
+    "natGatewayIdleTimeoutInMinutes": {
+      "value": 4
+    }
+  }
+}

@@ -1,0 +1,521 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourcePrefix": {
+      "type": "string",
+      "defaultValue": "nginx-lb",
+      "metadata": {
+        "description": "Prefix for all resource names"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "vnetAddressPrefix": {
+      "type": "string",
+      "defaultValue": "10.0.0.0/16",
+      "metadata": {
+        "description": "Address prefix for the virtual network"
+      }
+    },
+    "loadBalancerSubnetPrefix": {
+      "type": "string",
+      "defaultValue": "10.0.1.0/24",
+      "metadata": {
+        "description": "Address prefix for the load balancer subnet"
+      }
+    },
+    "containerSubnetPrefix": {
+      "type": "string",
+      "defaultValue": "10.0.2.0/24",
+      "metadata": {
+        "description": "Address prefix for the container subnet"
+      }
+    },
+    "bastionSubnetPrefix": {
+      "type": "string",
+      "defaultValue": "10.0.3.0/26",
+      "metadata": {
+        "description": "Address prefix for the Azure Bastion subnet (must be /26 or larger)"
+      }
+    },
+    "vmSubnetPrefix": {
+      "type": "string",
+      "defaultValue": "10.0.4.0/24",
+      "metadata": {
+        "description": "Address prefix for the VM subnet"
+      }
+    },
+    "vmAdminUsername": {
+      "type": "string",
+      "defaultValue": "vmadmin",
+      "metadata": {
+        "description": "Username for the VM administrator account"
+      }
+    },
+    "vmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password for the VM administrator account"
+      }
+    },
+    "containerImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/oss/nginx/nginx:1.15.5-alpine",
+      "metadata": {
+        "description": "Container image for web server (nginx load balancer)"
+      }
+    },
+    "natGatewayIdleTimeoutInMinutes": {
+      "type": "int",
+      "defaultValue": 4,
+      "minValue": 4,
+      "maxValue": 120,
+      "metadata": {
+        "description": "Idle timeout in minutes for NAT Gateway (4-120 minutes)"
+      }
+    }
+  },
+  "variables": {
+    "vnetName": "[concat(parameters('resourcePrefix'), '-vnet')]",
+    "loadBalancerSubnetName": "lb-subnet",
+    "containerSubnetName": "container-subnet",
+    "bastionSubnetName": "AzureBastionSubnet",
+    "vmSubnetName": "vm-subnet",
+    "bastionName": "[concat(parameters('resourcePrefix'), '-bastion')]",
+    "vmName": "[concat(parameters('resourcePrefix'), '-vm')]",
+    "vmNicName": "[concat(parameters('resourcePrefix'), '-vm-nic')]",
+    "bastionPublicIpName": "[concat(parameters('resourcePrefix'), '-bastion-pip')]",
+    "natGatewayName": "[concat(parameters('resourcePrefix'), '-nat')]",
+    "natGatewayPublicIpName": "[concat(parameters('resourcePrefix'), '-nat-pip')]",
+    "loadBalancerName": "[concat(parameters('resourcePrefix'), '-lb')]",
+    "containerGroupName": "[concat(parameters('resourcePrefix'), '-aci')]",
+    "frontendConfigName": "LoadBalancerFrontEnd",
+    "backendPoolName": "BackendPool",
+    "healthProbeName": "HealthProbe",
+    "loadBalancingRuleName": "HttpRule",
+    "udpHealthProbeName": "UdpHealthProbe",
+    "udpLoadBalancingRuleName": "UdpRule"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+      ],
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[parameters('vnetAddressPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('loadBalancerSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('loadBalancerSubnetPrefix')]",
+              "privateEndpointNetworkPolicies": "Enabled",
+              "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+          },
+          {
+            "name": "[variables('containerSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('containerSubnetPrefix')]",
+              "privateEndpointNetworkPolicies": "Enabled",
+              "privateLinkServiceNetworkPolicies": "Enabled",
+              "natGateway": {
+                "id": "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+              },
+              "delegations": [
+                {
+                  "name": "DelegationService",
+                  "properties": {
+                    "serviceName": "Microsoft.ContainerInstance/containerGroups"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "[variables('bastionSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('bastionSubnetPrefix')]",
+              "privateEndpointNetworkPolicies": "Enabled",
+              "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+          },
+          {
+            "name": "[variables('vmSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('vmSubnetPrefix')]",
+              "privateEndpointNetworkPolicies": "Enabled",
+              "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/loadBalancers",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('loadBalancerName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "sku": {
+        "name": "Standard",
+        "tier": "Regional"
+      },
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "name": "[variables('frontendConfigName')]",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('loadBalancerSubnetName'))]"
+              }
+            }
+          }
+        ],
+        "backendAddressPools": [
+          {
+            "name": "[variables('backendPoolName')]"
+          }
+        ],
+        "probes": [
+          {
+            "name": "[variables('healthProbeName')]",
+            "properties": {
+              "protocol": "Http",
+              "port": 8080,
+              "requestPath": "/health",
+              "intervalInSeconds": 15,
+              "numberOfProbes": 2
+            }
+          },
+          {
+            "name": "[variables('udpHealthProbeName')]",
+            "properties": {
+              "protocol": "Tcp",
+              "port": 8080,
+              "intervalInSeconds": 15,
+              "numberOfProbes": 2
+            }
+          }
+        ],
+        "loadBalancingRules": [
+          {
+            "name": "[variables('loadBalancingRuleName')]",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('loadBalancerName'), variables('frontendConfigName'))]"
+              },
+              "backendAddressPool": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('loadBalancerName'), variables('backendPoolName'))]"
+              },
+              "probe": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/probes', variables('loadBalancerName'), variables('healthProbeName'))]"
+              },
+              "protocol": "Tcp",
+              "frontendPort": 80,
+              "backendPort": 8080,
+              "idleTimeoutInMinutes": 4
+            }
+          },
+          {
+            "name": "[variables('udpLoadBalancingRuleName')]",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('loadBalancerName'), variables('frontendConfigName'))]"
+              },
+              "backendAddressPool": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('loadBalancerName'), variables('backendPoolName'))]"
+              },
+              "probe": {
+                "id": "[resourceId('Microsoft.Network/loadBalancers/probes', variables('loadBalancerName'), variables('udpHealthProbeName'))]"
+              },
+              "protocol": "Udp",
+              "frontendPort": 9090,
+              "backendPort": 9090,
+              "idleTimeoutInMinutes": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+        "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]"
+      ],
+      "properties": {
+        "containers": [
+          {
+            "name": "nginx",
+            "properties": {
+              "image": "[parameters('containerImage')]",
+              "ports": [
+                {
+                  "port": 8080,
+                  "protocol": "TCP"
+                },
+                {
+                  "port": 8081,
+                  "protocol": "TCP"
+                },
+                {
+                  "port": 9090,
+                  "protocol": "UDP"
+                }
+              ],
+              "environmentVariables": [],
+              "resources": {
+                "requests": {
+                  "cpu": 0.5,
+                  "memoryInGb": 0.5
+                }
+              },
+              "command": [
+                "/bin/sh",
+                "-c",
+                "apk add --no-cache netcat-openbsd && echo 'server { listen 8080; location /health { return 200 \"nginx is healthy\\n\"; add_header Content-Type text/plain; } location /udp-status { return 200 \"UDP echo server running on port 9090\\n\"; add_header Content-Type text/plain; } location / { return 200 \"<html><body><h1>Hello from nginx!</h1><p>This is an nginx server for load balancer testing.</p><p>Load balancer is working correctly.</p><p><strong>UDP Echo Server:</strong> Available on port 9090</p><p>Test with: <code>echo 'test message' | nc -u [container-ip] 9090</code></p></body></html>\"; add_header Content-Type text/html; } }' > /etc/nginx/conf.d/default.conf && nginx && while true; do echo 'UDP Echo Server Ready' | nc -l -u -p 9090; done"
+              ]
+            }
+          }
+        ],
+        "osType": "Linux",
+        "subnetIds": [
+          {
+            "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('containerSubnetName'))]"
+          }
+        ],
+        "restartPolicy": "Always"
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('bastionPublicIpName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard",
+        "tier": "Regional"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('natGatewayPublicIpName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard",
+        "tier": "Regional"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/natGateways",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('natGatewayName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('natGatewayPublicIpName'))]"
+      ],
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIpAddresses": [
+          {
+            "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('natGatewayPublicIpName'))]"
+          }
+        ],
+        "idleTimeoutInMinutes": "[parameters('natGatewayIdleTimeoutInMinutes')]"
+      }
+    },
+    {
+      "type": "Microsoft.Network/bastionHosts",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('bastionName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPublicIpName'))]"
+      ],
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "bastionHostIpConfiguration",
+            "properties": {
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('bastionSubnetName'))]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPublicIpName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('vmNicName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('vmSubnetName'))]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[variables('vmName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('vmNicName'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_D4s_v3"
+        },
+        "osProfile": {
+          "computerName": "[variables('vmName')]",
+          "adminUsername": "[parameters('vmAdminUsername')]",
+          "adminPassword": "[parameters('vmAdminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2019-Datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('vmNicName'))]"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "vnetName": {
+      "type": "string",
+      "value": "[variables('vnetName')]"
+    },
+    "vnetId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+    },
+    "loadBalancerName": {
+      "type": "string",
+      "value": "[variables('loadBalancerName')]"
+    },
+    "loadBalancerId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]"
+    },
+    "loadBalancerPrivateIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))).frontendIPConfigurations[0].properties.privateIPAddress]"
+    },
+    "containerGroupName": {
+      "type": "string",
+      "value": "[variables('containerGroupName')]"
+    },
+    "containerGroupId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerInstance/containerGroups', variables('containerGroupName'))]"
+    },
+    "containerGroupPrivateIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', variables('containerGroupName'))).ipAddress.ip]"
+    },
+    "bastionName": {
+      "type": "string",
+      "value": "[variables('bastionName')]"
+    },
+    "bastionId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/bastionHosts', variables('bastionName'))]"
+    },
+    "bastionPublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPublicIpName'))).ipAddress]"
+    },
+    "vmName": {
+      "type": "string",
+      "value": "[variables('vmName')]"
+    },
+    "vmId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+    },
+    "vmPrivateIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', variables('vmNicName'))).ipConfigurations[0].properties.privateIPAddress]"
+    },
+    "natGatewayName": {
+      "type": "string",
+      "value": "[variables('natGatewayName')]"
+    },
+    "natGatewayId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+    },
+    "natGatewayPublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('natGatewayPublicIpName'))).ipAddress]"
+    },
+    "instructions": {
+      "type": "string",
+      "value": "After deployment: 1) Manually add the Container Instance IP to the Load Balancer backend pool using: az network lb address-pool address add -g <resource-group> --lb-name <load-balancer-name> --pool-name <backend-pool-name> --name nginx-aci --vnet <vnet-name> --ip-address <container-ip>. 2) Use Azure Bastion to securely connect to the Windows Server 2019 VM for testing the internal load balancer."
+    }
+  }
+}
