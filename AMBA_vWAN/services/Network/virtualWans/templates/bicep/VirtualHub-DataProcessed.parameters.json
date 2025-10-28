@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "actionGroupResourceId": {
+      "value": "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.Insights/actionGroups/{action-group-name}"
+    },
+    "alertName": {
+      "value": "VirtualHub-DataProcessed"
+    },
+    "alertDescription": {
+      "value": "Virtual Hub Data Processed - Alert when hub data processing approaches capacity"
+    },
+    "virtualHubResourceId": {
+      "value": "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.Network/virtualHubs/{hub-name}"
+    },
+    "targetResourceRegion": {
+      "value": "eastus"
+    },
+    "alertSeverity": {
+      "value": 2
+    },
+    "routingInfrastructureUnits": {
+      "value": 4,
+      "metadata": {
+        "description": "Customer must specify the actual RIU count for their Virtual Hub. Each RIU = 1 Gbps capacity. Common values: 2 (basic), 4 (medium), 6-8 (enterprise), 10+ (large scale)"
+      }
+    },
+    "thresholdPercentage": {
+      "value": 80,
+      "metadata": {
+        "description": "Alert when data processing reaches 80% of calculated capacity"
+      }
+    },
+    "thresholdPeriodMinutes": {
+      "value": 15,
+      "metadata": {
+        "description": "Time period over which to calculate the threshold (15 minutes)"
+      }
+    },
+    "evaluationFrequency": {
+      "value": "PT5M"
+    },
+    "windowSize": {
+      "value": "PT15M"
+    },
+    "timeAggregation": {
+      "value": "Total"
+    },
+    "enabled": {
+      "value": true
+    },
+    "autoMitigate": {
+      "value": true
+    }
+  }
+}
