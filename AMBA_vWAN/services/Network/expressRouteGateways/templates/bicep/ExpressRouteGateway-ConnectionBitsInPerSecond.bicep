@@ -3,7 +3,7 @@
 param alertName string
 
 @description('Description of alert')
-param alertDescription string = 'ExpressRoute Gateway Connection Bits In Per Second - Monitoring ingress bandwidth to Azure via ExpressRoute Gateway. Uses real gateway scale unit detection for accurate thresholds.'
+param alertDescription string = 'ExpressRoute Gateway Connection Bits In Per Second - Monitoring ingress bandwidth utilization. Alerts when bandwidth exceeds capacity thresholds. Uses real gateway scale unit detection for accurate thresholds.'
 
 @description('Array of Azure resource Ids. For example - /subscriptions/00000000-0000-0000-0000-0000-00000000/resourceGroup/resource-group-name/Microsoft.Network/expressRouteGateways/gateway-name')
 @minLength(1)
@@ -34,7 +34,7 @@ param alertSeverity int = 0
   'LessThan'
   'LessThanOrEqual'
 ])
-param operator string = 'LessThan'
+param operator string = 'GreaterThan'
 
 @description('Auto-detect threshold based on actual gateway scale unit configuration. When true, threshold is calculated from the gateway minimum scale units.')
 param autoDetectThreshold bool = true
@@ -42,10 +42,10 @@ param autoDetectThreshold bool = true
 @description('Manual threshold value in bits per second. Use this when autoDetectThreshold is false. For vWAN ExpressRoute Gateways: each scale unit = 1 Gbps (1,000,000,000 bps).')
 param manualThreshold int = 1
 
-@description('Percentage of maximum capacity to use as threshold when auto-detecting (e.g., 10 means alert when below 10% of capacity)')
-@minValue(1)
-@maxValue(50)
-param thresholdPercentage int = 10
+@description('Percentage of maximum capacity to use as threshold when auto-detecting (e.g., 80 means alert when above 80% of capacity)')
+@minValue(50)
+@maxValue(95)
+param thresholdPercentage int = 80
 
 @description('how often the metric alert is evaluated represented in ISO 8601 duration format')
 @allowed([

@@ -335,11 +335,12 @@ The deployment script supports comprehensive action group configuration for aler
 - **SNAT Port Utilization**: `> 95%` - Severity 1
 - **Packet Drop Count**: `> 0` (any drops) - Severity 2
 - **CPU Utilization**: `> 80%` - Severity 2
-- **ExpressRoute Bandwidth**: `< 10%` of gateway capacity - Severity 0
+- **VPN Gateway Bandwidth**: `> 80%` of gateway scale unit capacity - Severity 0
+- **ExpressRoute Bandwidth**: `> 80%` of gateway capacity - Severity 0
 
 ### ExpressRoute Gateway Bandwidth Monitoring
 
-The ExpressRoute Gateway bandwidth alerts monitor ingress and egress traffic with **intelligent threshold detection** based on actual gateway configuration.
+The ExpressRoute Gateway bandwidth alerts monitor ingress and egress traffic with **intelligent threshold detection** based on actual gateway configuration. Alerts when bandwidth utilization **exceeds** capacity thresholds to warn of potential performance issues.
 
 #### Real SKU Detection
 
@@ -352,13 +353,15 @@ The bandwidth alerts automatically detect the actual gateway scale unit configur
 #### vWAN ExpressRoute Gateway Architecture
 
 **Scale Unit Model**
-| Scale Units | Bandwidth per Unit | Example Capacity | 10% Threshold |
+
+| Scale Units | Bandwidth per Unit | Example Capacity | 80% Threshold |
 |-------------|-------------------|------------------|---------------|
-| 2 units (min) | 1 Gbps | 2 Gbps guaranteed | 200 Mbps |
-| 5 units (min) | 1 Gbps | 5 Gbps guaranteed | 500 Mbps |
-| 10 units (min) | 1 Gbps | 10 Gbps guaranteed | 1 Gbps |
+| 2 units (min) | 1 Gbps | 2 Gbps guaranteed | 1.6 Gbps |
+| 5 units (min) | 1 Gbps | 5 Gbps guaranteed | 4 Gbps |
+| 10 units (min) | 1 Gbps | 10 Gbps guaranteed | 8 Gbps |
 
 **Auto-Scaling Configuration**
+
 - **Minimum Scale Units**: Guaranteed baseline capacity used for alert thresholds
 - **Maximum Scale Units**: Auto-scale ceiling (gateway can scale up based on demand)
 - **Capacity per Unit**: 1 Gbps bandwidth per scale unit
@@ -367,12 +370,55 @@ The bandwidth alerts automatically detect the actual gateway scale unit configur
 
 - **Auto-Detection (Recommended)**: `autoDetectThreshold: true` - Uses actual gateway min scale units
 - **Manual Thresholds**: `autoDetectThreshold: false` + `manualThreshold: <value>` for custom settings
-- **Percentage-Based**: Configure alert when bandwidth drops below percentage of guaranteed capacity
+- **Percentage-Based**: Configure alert when bandwidth exceeds percentage of guaranteed capacity
 
-**Example Auto-Detected Thresholds:**
-- Gateway with 2 min scale units: 10% threshold = 200 Mbps
-- Gateway with 5 min scale units: 10% threshold = 500 Mbps  
-- Gateway with 10 min scale units: 10% threshold = 1 Gbps
+**Example Auto-Detected Thresholds (80% default):**
+
+- Gateway with 2 min scale units: 80% threshold = 1.6 Gbps
+- Gateway with 5 min scale units: 80% threshold = 4 Gbps  
+- Gateway with 10 min scale units: 80% threshold = 8 Gbps
+
+### VPN Gateway Bandwidth Monitoring
+
+The VPN Gateway bandwidth alerts monitor tunnel average bandwidth with **intelligent threshold detection** based on actual gateway scale unit configuration.
+
+#### Auto-Detection Capabilities
+
+The bandwidth alerts automatically detect the actual VPN gateway scale unit configuration:
+
+- **Real-Time Detection**: Queries the deployed gateway's `vpnGatewayScaleUnit` property
+- **Dynamic Thresholds**: Automatically calculates appropriate thresholds based on actual scale units
+- **Capacity Awareness**: Uses actual gateway capacity for threshold calculation
+
+#### vWAN VPN Gateway Architecture
+
+**Scale Unit Model**
+
+| Scale Units | Bandwidth per Unit | Example Capacity | 80% Threshold |
+|-------------|-------------------|------------------|---------------|
+| 1 unit | 500 Mbps | 500 Mbps total | 400 Mbps |
+| 2 units | 500 Mbps | 1 Gbps total | 800 Mbps |
+| 5 units | 500 Mbps | 2.5 Gbps total | 2 Gbps |
+| 10 units | 500 Mbps | 5 Gbps total | 4 Gbps |
+
+**Scale Unit Configuration**
+
+- **Bandwidth per Unit**: 500 Mbps aggregate throughput per scale unit
+- **Dynamic Scaling**: Scale units can be adjusted based on requirements
+- **Tunnel Distribution**: Bandwidth is distributed across all active tunnels
+
+#### VPN Gateway Configuration
+
+- **Auto-Detection (Default)**: Template automatically reads `vpnGatewayScaleUnit` from gateway configuration
+- **Percentage-Based Thresholds**: Configure alert when bandwidth exceeds percentage of total capacity (default 80%)
+- **Real-Time Calculation**: Thresholds calculated as: `(Scale Units × 500 Mbps × Threshold%) / 8` bytes per second
+
+**Example Auto-Detected Thresholds (80% default):**
+
+- Gateway with 1 scale unit: 80% threshold = 400 Mbps
+- Gateway with 2 scale units: 80% threshold = 800 Mbps  
+- Gateway with 5 scale units: 80% threshold = 2 Gbps
+- Gateway with 10 scale units: 80% threshold = 4 Gbps
 
 ### Timing Configuration
 
