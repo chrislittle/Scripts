@@ -11,10 +11,12 @@ These alert templates are based on the [Azure Virtual WAN monitoring best practi
 ## Available Alert Templates
 
 ### ✅ Virtual Hubs (2 templates)
+
 - **BGP Peer Status**: Monitors BGP connectivity between virtual hub router and gateways (Severity 1)
 - **Virtual Hub Data Processed**: Monitors data processing capacity utilization (Severity 3)
 
 ### ✅ Site-to-Site VPN Gateways (6 templates)
+
 - **Tunnel Average Bandwidth**: Monitors tunnel bandwidth utilization with intelligent scale unit detection
 - **Activity Log Delete**: VPN Gateway deletion activity log monitoring
 - **Tunnel Egress Bytes**: Monitors tunnel egress traffic volume
@@ -23,11 +25,13 @@ These alert templates are based on the [Azure Virtual WAN monitoring best practi
 - **Tunnel Disconnect Events**: Log-based alert for tunnel disconnections (Severity 1)
 
 ### ✅ ExpressRoute Gateways (3 templates)
+
 - **CPU Utilization**: Monitors gateway CPU performance (Severity 2)
 - **Connection Bits In Per Second**: Monitors ingress bandwidth to Azure (Severity 0)
 - **Connection Bits Out Per Second**: Monitors egress bandwidth from Azure (Severity 0)
 
 ### ✅ Azure Firewall (1 template)
+
 - **SNAT Port Utilization**: Monitors SNAT port exhaustion risk (Severity 1)
 
 **Total: 12 production-ready alert templates**
@@ -70,6 +74,7 @@ The PowerShell deployment script includes an interactive mode that guides you th
 ```
 
 **Interactive features:**
+
 - **Multi-subscription support**: Automatically discovers and lets you select from available subscriptions
 - **Resource discovery**: Scans selected subscriptions for Virtual WAN components
 - **Alert type selection**: Choose specific alert types or deploy all
@@ -92,6 +97,7 @@ The `-WhatIf` mode shows available templates and configuration without scanning 
 ```
 
 **WhatIf Benefits:**
+
 - ✅ **No Resource Scanning**: No Azure CLI calls or authentication required
 - ✅ **Instant Preview**: Shows configuration and available templates immediately
 - ✅ **Configuration Validation**: Verify settings before actual deployment
@@ -111,6 +117,7 @@ Real deployments scan for vWAN resources and deploy only matching alert template
 ```
 
 **Deployment Logic:**
+
 - **Resource Discovery**: Scans subscriptions for Virtual Hubs, VPN Gateways, ExpressRoute Gateways, Firewalls
 - **Selective Deployment**: Only deploys alert templates for discovered resource types
 - **Zero Resources = Zero Alerts**: If no vWAN resources exist, no alerts are deployed
@@ -153,6 +160,7 @@ For automated scenarios, use command-line parameters:
 ```
 
 **Available Alert Types:**
+
 - `VirtualHub` - Virtual Hub BGP and capacity alerts (2 templates)
 - `S2SVPN` - Site-to-Site VPN connectivity and performance alerts (6 templates - AMBA compliant)
 - `ExpressRoute` - ExpressRoute Gateway performance alerts (3 templates)
@@ -511,10 +519,6 @@ az monitor activity-log list --resource-group "rg-monitoring" --start-time "2024
 - [Azure Virtual WAN Monitoring Best Practices](https://learn.microsoft.com/en-us/azure/virtual-wan/monitor-virtual-wan)
 - [Azure Monitor Baseline Alerts (AMBA)](https://aka.ms/amba)
 - [Azure Monitor Alerts Overview](https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-overview)
-
-### Contributing
-
-Follow AMBA naming conventions (`MetricName_GUID.bicep`), include proper parameter validation, and test templates before submission.
 
 ## License
 

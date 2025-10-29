@@ -877,6 +877,7 @@ function Get-VirtualHubScaleUnits {
         
         do {
             $riuInput = Read-Host "Enter routing infrastructure units (2-50, default 2)"
+            $rius = 0  # Initialize variable for [ref] usage
             
             if ([string]::IsNullOrWhiteSpace($riuInput)) {
                 $rius = 2
