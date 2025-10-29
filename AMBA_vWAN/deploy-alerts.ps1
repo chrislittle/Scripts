@@ -506,10 +506,10 @@ function New-ActionGroup {
         # Create resource group if it doesn't exist
         New-ResourceGroupIfNotExists -ResourceGroup $ActionGroupConfig.ResourceGroup -Region $Region -WhatIfMode $WhatIfMode
         
-        # Build action group creation command
-        $agCommand = "az monitor action-group create --name '$($ActionGroupConfig.Name)' --resource-group '$($ActionGroupConfig.ResourceGroup)' --subscription '$($ActionGroupConfig.SubscriptionId)'"
+        # Build action group creation command using temporary JSON files for complex parameters
+        $tempPath = [System.IO.Path]::GetTempPath()
         
-        # Add email notifications using the correct format
+        # Add email notifications using temporary JSON file
         if ($ActionGroupConfig.Notifications.Emails -and $ActionGroupConfig.Notifications.Emails.Count -gt 0) {
             $emailReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.Emails.Count; $i++) {
@@ -519,12 +519,11 @@ function New-ActionGroup {
                     emailAddress = $email
                 }
             }
-            # Convert to JSON format for Azure CLI
-            $emailJson = ($emailReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
-            $agCommand += " --email-receivers '$emailJson'"
+            $emailJsonFile = Join-Path $tempPath "emails-$(Get-Date -Format 'yyyyMMddHHmmss').json"
+            $emailReceivers | ConvertTo-Json -Depth 3 | Out-File -FilePath $emailJsonFile -Encoding UTF8
         }
         
-        # Add SMS notifications using the correct format
+        # Add SMS notifications using temporary JSON file
         if ($ActionGroupConfig.Notifications.SMS -and $ActionGroupConfig.Notifications.SMS.Count -gt 0) {
             $smsReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.SMS.Count; $i++) {
@@ -541,12 +540,12 @@ function New-ActionGroup {
                 }
             }
             if ($smsReceivers.Count -gt 0) {
-                $smsJson = ($smsReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
-                $agCommand += " --sms-receivers '$smsJson'"
+                $smsJsonFile = Join-Path $tempPath "sms-$(Get-Date -Format 'yyyyMMddHHmmss').json"
+                $smsReceivers | ConvertTo-Json -Depth 3 | Out-File -FilePath $smsJsonFile -Encoding UTF8
             }
         }
         
-        # Add webhook notifications using the correct format
+        # Add webhook notifications using temporary JSON file
         if ($ActionGroupConfig.Notifications.Webhooks -and $ActionGroupConfig.Notifications.Webhooks.Count -gt 0) {
             $webhookReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.Webhooks.Count; $i++) {
@@ -556,18 +555,80 @@ function New-ActionGroup {
                     serviceUri = $webhook
                 }
             }
-            $webhookJson = ($webhookReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
-            $agCommand += " --webhook-receivers '$webhookJson'"
+            $webhookJsonFile = Join-Path $tempPath "webhooks-$(Get-Date -Format 'yyyyMMddHHmmss').json"
+            $webhookReceivers | ConvertTo-Json -Depth 3 | Out-File -FilePath $webhookJsonFile -Encoding UTF8
         }
         
-        # Execute the command
-        $result = Invoke-Expression "$agCommand --query 'id' --output tsv"
+        # Build and execute the Azure CLI command with file references
+        $agArgs = @(
+            "monitor", "action-group", "create",
+            "--name", $ActionGroupConfig.Name,
+            "--resource-group", $ActionGroupConfig.ResourceGroup,
+            "--subscription", $ActionGroupConfig.SubscriptionId
+        )
+        
+        if ($emailJsonFile -and (Test-Path $emailJsonFile)) {
+            $agArgs += "--email-receivers"
+            $agArgs += "@$emailJsonFile"
+        }
+        
+        if ($smsJsonFile -and (Test-Path $smsJsonFile)) {
+            $agArgs += "--sms-receivers" 
+            $agArgs += "@$smsJsonFile"
+        }
+        
+        if ($webhookJsonFile -and (Test-Path $webhookJsonFile)) {
+            $agArgs += "--webhook-receivers"
+            $agArgs += "@$webhookJsonFile"
+        }
+        
+        $agArgs += "--query"
+        $agArgs += "id"
+        $agArgs += "--output"
+        $agArgs += "tsv"
+        
+        # Execute the command using & az instead of Invoke-Expression for better parameter handling
+        if ($Debug) {
+            Write-Host "[DEBUG] Executing Azure CLI command with args: $($agArgs -join ' ')" -ForegroundColor Magenta
+        }
+        
+        # Capture both stdout and stderr
+        $result = $null
+        $errorOutput = $null
+        try {
+            $result = & az @agArgs 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $errorOutput = $result | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }
+                $result = $result | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
+            }
+        }
+        catch {
+            $errorOutput = $_.Exception.Message
+        }
+        
+        # Clean up temporary files
+        if ($emailJsonFile -and (Test-Path $emailJsonFile)) {
+            Remove-Item $emailJsonFile -Force -ErrorAction SilentlyContinue
+        }
+        if ($smsJsonFile -and (Test-Path $smsJsonFile)) {
+            Remove-Item $smsJsonFile -Force -ErrorAction SilentlyContinue
+        }
+        if ($webhookJsonFile -and (Test-Path $webhookJsonFile)) {
+            Remove-Item $webhookJsonFile -Force -ErrorAction SilentlyContinue
+        }
         
         if ($LASTEXITCODE -eq 0 -and $result) {
             Write-Success "Action group '$($ActionGroupConfig.Name)' created successfully"
             return $result.Trim()
         } else {
-            Write-Error-Log "Failed to create action group '$($ActionGroupConfig.Name)'"
+            $errorMsg = "Failed to create action group '$($ActionGroupConfig.Name)'"
+            if ($errorOutput) {
+                $errorMsg += ": $errorOutput"
+            }
+            Write-Error-Log $errorMsg
+            if ($Debug -and $errorOutput) {
+                Write-Host "[DEBUG] Azure CLI Error: $errorOutput" -ForegroundColor Red
+            }
             return $null
         }
     }
@@ -1259,12 +1320,19 @@ function Deploy-MetricAlert {
     
     Write-Log "Deploying metric alert: $AlertName"
     
+    # Validate template file exists
+    if (!(Test-Path $TemplatePath)) {
+        Write-Error-Log "Template file not found: $TemplatePath"
+        return $false
+    }
+    
     if ($WhatIf) {
         Write-Host "WHAT-IF: Would deploy metric alert '$AlertName' using template '$TemplatePath'" -ForegroundColor Cyan
         return $true
     }
     
-    az deployment group create `
+    # Capture deployment output for better error reporting
+    $deployOutput = az deployment group create `
         --resource-group $TargetResourceGroup `
         --template-file $TemplatePath `
         --parameters `
@@ -1274,7 +1342,7 @@ function Deploy-MetricAlert {
             targetResourceRegion="$TargetRegion" `
             targetResourceType="$TargetResourceType" `
             alertSeverity="$Severity" `
-        --output none 2>$null
+        --output json 2>&1
         
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Deployed: $AlertName"
@@ -1282,22 +1350,33 @@ function Deploy-MetricAlert {
         # Add action group to the alert if provided
         if (-not [string]::IsNullOrWhiteSpace($ActionGroupId)) {
             Write-Log "Adding action group to alert: $AlertName"
-            az monitor metrics alert update `
+            $agOutput = az monitor metrics alert update `
                 --name "$AlertName" `
                 --resource-group $TargetResourceGroup `
                 --add-action $ActionGroupId `
-                --output none 2>$null
+                --output none 2>&1
                 
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Action group added to: $AlertName"
             } else {
                 Write-Warning-Log "Failed to add action group to: $AlertName"
+                if ($Debug -and $agOutput) {
+                    Write-Host "[DEBUG] Action group error: $($agOutput -join '; ')" -ForegroundColor Red
+                }
             }
         }
         
         return $true
     } else {
         Write-Error-Log "Failed to deploy: $AlertName"
+        if ($deployOutput) {
+            $errorLines = $deployOutput | Where-Object { $_ -match "ERROR|error|Error" }
+            if ($errorLines) {
+                Write-Host "[ERROR DETAILS] $($errorLines -join '; ')" -ForegroundColor Red
+            } elseif ($Debug) {
+                Write-Host "[DEBUG] Full deployment output: $($deployOutput -join '; ')" -ForegroundColor Red
+            }
+        }
         return $false
     }
 }
@@ -1317,14 +1396,22 @@ function Deploy-VirtualHubDataProcessedAlert {
     
     Write-Log "Deploying Virtual Hub Data Processed alert: $AlertName (RIUs: $RoutingInfrastructureUnits)"
     
+    # Validate template file exists
+    $templatePath = "services/Network/virtualWans/templates/bicep/VirtualHub-DataProcessed.bicep"
+    if (!(Test-Path $templatePath)) {
+        Write-Error-Log "Template file not found: $templatePath"
+        return $false
+    }
+    
     if ($WhatIf) {
         Write-Host "WHAT-IF: Would deploy Virtual Hub Data Processed alert '$AlertName' with $RoutingInfrastructureUnits RIUs" -ForegroundColor Cyan
         return $true
     }
     
-    az deployment group create `
+    # Capture deployment output for better error reporting
+    $deployOutput = az deployment group create `
         --resource-group $TargetResourceGroup `
-        --template-file "services/Network/virtualWans/templates/bicep/VirtualHub-DataProcessed.bicep" `
+        --template-file $templatePath `
         --parameters `
             alertName="$AlertName" `
             alertDescription="$Description" `
@@ -1332,7 +1419,7 @@ function Deploy-VirtualHubDataProcessedAlert {
             targetResourceRegion="$TargetRegion" `
             routingInfrastructureUnits="$RoutingInfrastructureUnits" `
             alertSeverity="$Severity" `
-        --output none 2>$null
+        --output json 2>&1
         
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Deployed: $AlertName"
@@ -1340,22 +1427,33 @@ function Deploy-VirtualHubDataProcessedAlert {
         # Add action group to the alert if provided
         if (-not [string]::IsNullOrWhiteSpace($ActionGroupId)) {
             Write-Log "Adding action group to alert: $AlertName"
-            az monitor metrics alert update `
+            $agOutput = az monitor metrics alert update `
                 --name "$AlertName" `
                 --resource-group $TargetResourceGroup `
                 --add-action $ActionGroupId `
-                --output none 2>$null
+                --output none 2>&1
                 
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Action group added to: $AlertName"
             } else {
                 Write-Warning-Log "Failed to add action group to: $AlertName"
+                if ($Debug -and $agOutput) {
+                    Write-Host "[DEBUG] Action group error: $($agOutput -join '; ')" -ForegroundColor Red
+                }
             }
         }
         
         return $true
     } else {
         Write-Error-Log "Failed to deploy: $AlertName"
+        if ($deployOutput) {
+            $errorLines = $deployOutput | Where-Object { $_ -match "ERROR|error|Error" }
+            if ($errorLines) {
+                Write-Host "[ERROR DETAILS] $($errorLines -join '; ')" -ForegroundColor Red
+            } elseif ($Debug) {
+                Write-Host "[DEBUG] Full deployment output: $($deployOutput -join '; ')" -ForegroundColor Red
+            }
+        }
         return $false
     }
 }
@@ -1379,12 +1477,19 @@ function Deploy-LogAlert {
     
     Write-Log "Deploying log alert: $AlertName"
     
+    # Validate template file exists
+    if (!(Test-Path $TemplatePath)) {
+        Write-Error-Log "Template file not found: $TemplatePath"
+        return $false
+    }
+    
     if ($WhatIf) {
         Write-Host "WHAT-IF: Would deploy log alert '$AlertName' using template '$TemplatePath'" -ForegroundColor Cyan
         return $true
     }
     
-    az deployment group create `
+    # Capture deployment output for better error reporting
+    $deployOutput = az deployment group create `
         --resource-group $TargetResourceGroup `
         --template-file $TemplatePath `
         --parameters `
@@ -1392,7 +1497,7 @@ function Deploy-LogAlert {
             alertDescription="$Description" `
             workspaceId="$WorkspaceId" `
             alertSeverity="$Severity" `
-        --output none 2>$null
+        --output json 2>&1
         
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Deployed: $AlertName"
@@ -1400,22 +1505,33 @@ function Deploy-LogAlert {
         # Add action group to the alert if provided
         if (-not [string]::IsNullOrWhiteSpace($ActionGroupId)) {
             Write-Log "Adding action group to log alert: $AlertName"
-            az monitor log-analytics alert update `
+            $agOutput = az monitor log-analytics alert update `
                 --name "$AlertName" `
                 --resource-group $TargetResourceGroup `
                 --add-action $ActionGroupId `
-                --output none 2>$null
+                --output none 2>&1
                 
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "Action group added to: $AlertName"
             } else {
                 Write-Warning-Log "Failed to add action group to: $AlertName"
+                if ($Debug -and $agOutput) {
+                    Write-Host "[DEBUG] Action group error: $($agOutput -join '; ')" -ForegroundColor Red
+                }
             }
         }
         
         return $true
     } else {
         Write-Error-Log "Failed to deploy: $AlertName"
+        if ($deployOutput) {
+            $errorLines = $deployOutput | Where-Object { $_ -match "ERROR|error|Error" }
+            if ($errorLines) {
+                Write-Host "[ERROR DETAILS] $($errorLines -join '; ')" -ForegroundColor Red
+            } elseif ($Debug) {
+                Write-Host "[DEBUG] Full deployment output: $($deployOutput -join '; ')" -ForegroundColor Red
+            }
+        }
         return $false
     }
 }
@@ -1432,25 +1548,40 @@ function Deploy-ActivityLogAlert {
     
     Write-Log "Deploying activity log alert: $AlertName"
     
+    # Validate template file exists
+    if (!(Test-Path $TemplatePath)) {
+        Write-Error-Log "Template file not found: $TemplatePath"
+        return $false
+    }
+    
     if ($WhatIf) {
         Write-Host "WHAT-IF: Would deploy activity log alert '$AlertName' using template '$TemplatePath'" -ForegroundColor Cyan
         return $true
     }
     
-    az deployment group create `
+    # Capture deployment output for better error reporting
+    $deployOutput = az deployment group create `
         --resource-group $TargetResourceGroup `
         --template-file $TemplatePath `
         --parameters `
             alertRuleName="$AlertName" `
             alertRuleDescription="$Description" `
             actionGroupResourceId="$ActionGroupId" `
-        --output none 2>$null
+        --output json 2>&1
         
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Deployed: $AlertName"
         return $true
     } else {
         Write-Error-Log "Failed to deploy: $AlertName"
+        if ($deployOutput) {
+            $errorLines = $deployOutput | Where-Object { $_ -match "ERROR|error|Error" }
+            if ($errorLines) {
+                Write-Host "[ERROR DETAILS] $($errorLines -join '; ')" -ForegroundColor Red
+            } elseif ($Debug) {
+                Write-Host "[DEBUG] Full deployment output: $($deployOutput -join '; ')" -ForegroundColor Red
+            }
+        }
         return $false
     }
 }
