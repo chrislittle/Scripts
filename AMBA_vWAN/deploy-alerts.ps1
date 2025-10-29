@@ -16,7 +16,8 @@ param(
     [switch]$Interactive,
     [switch]$WhatIf,
     [switch]$CentralizedMonitoring,
-    [switch]$Help
+    [switch]$Help,
+    [switch]$Debug
 )
 
 # Configuration
@@ -63,7 +64,7 @@ OPTIONS:
     -SubscriptionIds <string[]>    Array of Azure subscription IDs (supports multiple)
     -ResourceGroup <string>        Resource group for alerts (default: rg-vwan-monitoring)
     -Location <string>             Azure region (default: East US)  
-    -LogAnalyticsWorkspace <string> Log Analytics workspace resource ID (required for log alerts)
+    -LogAnalyticsWorkspace <string> Log Analytics workspace resource ID (supports cross-subscription workspaces)
     -AlertTypes <string[]>         Alert types to deploy: VirtualHub, S2SVPN, ExpressRoute, Firewall, All
     -ActionGroupName <string>      Name for new action group (use with notification parameters)
     -ActionGroupResourceGroup <string> Resource group for action group (defaults to alert resource group)
@@ -103,7 +104,12 @@ REQUIREMENTS:
     - Azure CLI installed and authenticated
     - Azure PowerShell module (optional, for enhanced functionality)
     - Appropriate permissions to create alerts and read vWAN resources across target subscriptions
-    - Log Analytics workspace for log-based alerts
+    - Log Analytics workspace for log-based alerts (supports cross-subscription workspaces)
+
+CROSS-SUBSCRIPTION SUPPORT:
+    This script supports enterprise landing zone patterns where Log Analytics workspaces
+    are in a separate management/logging subscription from the vWAN connectivity resources.
+    The script will automatically discover workspaces across all accessible subscriptions.
 "@
 }
 
@@ -116,6 +122,40 @@ if ($Help) {
 function Write-Log {
     param([string]$Message)
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message" -ForegroundColor Blue
+}
+
+# Test Azure CLI connectivity
+function Test-AzureCliConnectivity {
+    param([string]$SubscriptionId)
+    
+    Write-Log "Testing Azure CLI connectivity..."
+    try {
+        # Test basic connectivity
+        $currentAccount = az account show --query "user.name" --output tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($currentAccount)) {
+            Write-Error-Log "Azure CLI is not authenticated or not working properly."
+            Write-Host "Please run 'az login' to authenticate with Azure." -ForegroundColor Yellow
+            return $false
+        }
+        
+        Write-Log "Authenticated as: $currentAccount"
+        
+        # Test subscription access if provided
+        if (![string]::IsNullOrEmpty($SubscriptionId)) {
+            $subTest = az account show --subscription $SubscriptionId --query "id" --output tsv 2>$null
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($subTest)) {
+                Write-Warning-Log "Cannot access subscription '$SubscriptionId'. Please check permissions."
+                return $false
+            }
+            Write-Log "Subscription access confirmed: $SubscriptionId"
+        }
+        
+        return $true
+    }
+    catch {
+        Write-Error-Log "Azure CLI connectivity test failed: $($_.Exception.Message)"
+        return $false
+    }
 }
 
 function Write-Error-Log {
@@ -469,41 +509,55 @@ function New-ActionGroup {
         # Build action group creation command
         $agCommand = "az monitor action-group create --name '$($ActionGroupConfig.Name)' --resource-group '$($ActionGroupConfig.ResourceGroup)' --subscription '$($ActionGroupConfig.SubscriptionId)'"
         
-        # Add email notifications
+        # Add email notifications using the correct format
         if ($ActionGroupConfig.Notifications.Emails -and $ActionGroupConfig.Notifications.Emails.Count -gt 0) {
-            $emailActions = @()
+            $emailReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.Emails.Count; $i++) {
                 $email = $ActionGroupConfig.Notifications.Emails[$i]
-                $emailActions += "email-$($i + 1) $email"
+                $emailReceivers += @{
+                    name = "email-$($i + 1)"
+                    emailAddress = $email
+                }
             }
-            $agCommand += " --email " + ($emailActions -join " ")
+            # Convert to JSON format for Azure CLI
+            $emailJson = ($emailReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
+            $agCommand += " --email-receivers '$emailJson'"
         }
         
-        # Add SMS notifications
+        # Add SMS notifications using the correct format
         if ($ActionGroupConfig.Notifications.SMS -and $ActionGroupConfig.Notifications.SMS.Count -gt 0) {
-            $smsActions = @()
+            $smsReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.SMS.Count; $i++) {
                 $phone = $ActionGroupConfig.Notifications.SMS[$i]
                 # Extract country code and number
                 if ($phone -match '^\+?(\d{1,3})(\d{10,12})$') {
                     $countryCode = $matches[1]
                     $number = $matches[2]
-                    $smsActions += "sms-$($i + 1) $countryCode $number"
+                    $smsReceivers += @{
+                        name = "sms-$($i + 1)"
+                        countryCode = $countryCode
+                        phoneNumber = $number
+                    }
                 }
             }
-            if ($smsActions.Count -gt 0) {
-                $agCommand += " --sms " + ($smsActions -join " ")
+            if ($smsReceivers.Count -gt 0) {
+                $smsJson = ($smsReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
+                $agCommand += " --sms-receivers '$smsJson'"
             }
         }
         
-        # Add webhook notifications
+        # Add webhook notifications using the correct format
         if ($ActionGroupConfig.Notifications.Webhooks -and $ActionGroupConfig.Notifications.Webhooks.Count -gt 0) {
-            $webhookActions = @()
+            $webhookReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.Webhooks.Count; $i++) {
                 $webhook = $ActionGroupConfig.Notifications.Webhooks[$i]
-                $webhookActions += "webhook-$($i + 1) $webhook"
+                $webhookReceivers += @{
+                    name = "webhook-$($i + 1)"
+                    serviceUri = $webhook
+                }
             }
-            $agCommand += " --webhook " + ($webhookActions -join " ")
+            $webhookJson = ($webhookReceivers | ConvertTo-Json -Compress) -replace '"', '\"'
+            $agCommand += " --webhook-receivers '$webhookJson'"
         }
         
         # Execute the command
@@ -760,24 +814,158 @@ function Get-ExistingResourceGroup {
     }
 }
 
+function Test-LogAnalyticsWorkspace {
+    param(
+        [string]$WorkspaceId
+    )
+    
+    if ([string]::IsNullOrEmpty($WorkspaceId)) {
+        return $false
+    }
+    
+    Write-Host "Validating Log Analytics workspace access..." -ForegroundColor Gray
+    
+    try {
+        # Extract subscription ID from workspace resource ID
+        $subscriptionId = $null
+        if ($WorkspaceId -match "/subscriptions/([^/]+)/") {
+            $subscriptionId = $matches[1]
+        }
+        
+        if ($subscriptionId) {
+            # Try to get workspace details to validate access
+            $workspace = az monitor log-analytics workspace show --ids $WorkspaceId --output json 2>$null
+            if ($LASTEXITCODE -eq 0 -and ![string]::IsNullOrEmpty($workspace)) {
+                $workspaceInfo = $workspace | ConvertFrom-Json
+                Write-Host "✓ Validated workspace: $($workspaceInfo.name) in subscription $($subscriptionId.Substring(0,8))..." -ForegroundColor Green
+                return $true
+            }
+        }
+        
+        # Fallback: try resource show command
+        $resource = az resource show --ids $WorkspaceId --output json 2>$null
+        if ($LASTEXITCODE -eq 0 -and ![string]::IsNullOrEmpty($resource)) {
+            $resourceInfo = $resource | ConvertFrom-Json
+            Write-Host "✓ Validated workspace resource: $($resourceInfo.name)" -ForegroundColor Green
+            return $true
+        }
+        
+        Write-Warning-Log "Unable to validate workspace access. This may indicate insufficient permissions or the workspace doesn't exist."
+        Write-Host "Note: Cross-subscription workspaces require appropriate RBAC permissions." -ForegroundColor Yellow
+        return $false
+    }
+    catch {
+        Write-Warning-Log "Workspace validation failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Get-LogAnalyticsInput {
     Write-Host "`n[DATA] Log Analytics Workspace Configuration" -ForegroundColor Cyan
     Write-Host ("=" * 50) -ForegroundColor Cyan
     Write-Host "Required for log-based alerts (S2S VPN disconnect events, etc.)" -ForegroundColor Gray
+    Write-Host "Supports workspaces in any accessible subscription (landing zone pattern)" -ForegroundColor Gray
     
-    # Discover available Log Analytics workspaces
+    # Discover available Log Analytics workspaces across all subscriptions
     Write-Host "`n[SEARCH] Discovering Log Analytics workspaces..." -ForegroundColor Yellow
     
+    if ($Debug) {
+        Write-Host "[DEBUG] Starting Log Analytics workspace discovery..." -ForegroundColor Magenta
+        $currentSub = az account show --query "name" --output tsv 2>$null
+        Write-Host "[DEBUG] Current subscription: $currentSub" -ForegroundColor Magenta
+    }
+    
     try {
-        $workspaces = az monitor log-analytics workspace list --query "[].{id:id, name:name, resourceGroup:resourceGroup, location:location}" --output json | ConvertFrom-Json
+        # Always search across ALL accessible subscriptions for Log Analytics workspaces
+        # This is important for landing zone designs where workspaces are in management/logging subscriptions
+        Write-Host "Searching for Log Analytics workspaces across all accessible subscriptions..." -ForegroundColor Gray
+        $allWorkspaces = @()
+        $workspacesBySubscription = @{}
+        
+        # Get current subscription list
+        $subs = az account list --query "[?state=='Enabled'].{id:id, name:name}" --output json 2>$null | ConvertFrom-Json
+        if (-not $subs -or $subs.Count -eq 0) {
+            Write-Warning-Log "Unable to retrieve subscription list. Please check your Azure CLI authentication."
+            return
+        }
+        
+        Write-Host "Checking $($subs.Count) accessible subscription(s)..." -ForegroundColor Gray
+        
+        foreach ($sub in $subs) {
+            try {
+                if ($Debug) {
+                    Write-Host "[DEBUG] Searching subscription: $($sub.name) ($($sub.id))" -ForegroundColor Magenta
+                }
+                
+                $subWorkspacesJson = az resource list --subscription $sub.id --resource-type "Microsoft.OperationalInsights/workspaces" --query "[].{id:id, name:name, resourceGroup:resourceGroup, location:location, subscriptionId:'$($sub.id)', subscriptionName:'$($sub.name)'}" --output json 2>$null
+                if ($LASTEXITCODE -eq 0 -and ![string]::IsNullOrEmpty($subWorkspacesJson)) {
+                    $subWorkspaces = $subWorkspacesJson | ConvertFrom-Json
+                    if ($subWorkspaces -and $subWorkspaces.Count -gt 0) {
+                        $allWorkspaces += $subWorkspaces
+                        $workspacesBySubscription[$sub.name] = $subWorkspaces
+                        Write-Host "  ✓ Found $($subWorkspaces.Count) workspace(s) in '$($sub.name)'" -ForegroundColor Green
+                        
+                        if ($Debug) {
+                            foreach ($ws in $subWorkspaces) {
+                                Write-Host "    [DEBUG] Workspace: $($ws.name) in $($ws.resourceGroup)" -ForegroundColor Magenta
+                            }
+                        }
+                    }
+                } else {
+                    if ($Debug) {
+                        Write-Host "    [DEBUG] No workspaces found in $($sub.name)" -ForegroundColor Magenta
+                    }
+                }
+            }
+            catch {
+                Write-Warning-Log "Failed to search subscription '$($sub.name)': $($_.Exception.Message)"
+                if ($Debug) {
+                    Write-Host "[DEBUG] Error details: $($_.Exception)" -ForegroundColor Magenta
+                }
+            }
+        }
+        
+        $workspaces = $allWorkspaces
+        
+        # Show summary of discovered workspaces
+        if ($workspaces -and $workspaces.Count -gt 0) {
+            Write-Host "`n✓ Successfully discovered $($workspaces.Count) Log Analytics workspace(s) across $($subs.Count) subscription(s)" -ForegroundColor Green
+            
+            # Show unique subscription count where workspaces were found
+            $workspaceSubscriptions = $workspaces | Group-Object subscriptionName | Measure-Object
+            if ($workspaceSubscriptions.Count -gt 0) {
+                Write-Host "  Found workspaces in $($workspaceSubscriptions.Count) subscription(s)" -ForegroundColor Gray
+            }
+        }
         
         if (-not $workspaces -or $workspaces.Count -eq 0) {
             Write-Warning-Log "No Log Analytics workspaces found in accessible subscriptions."
+            
+            # Show debugging information if Debug flag is set
+            if ($Debug) {
+                Write-Host "`n[DEBUG] Log Analytics Discovery Troubleshooting:" -ForegroundColor Magenta
+                Write-Host "1. Check if you have any Log Analytics workspaces:" -ForegroundColor Magenta
+                Write-Host "   az resource list --resource-type 'Microsoft.OperationalInsights/workspaces' --output table" -ForegroundColor Gray
+                Write-Host "2. Check permissions on subscriptions" -ForegroundColor Magenta
+                Write-Host "3. Verify you have Reader role on workspaces or subscriptions" -ForegroundColor Magenta
+                
+                # Try a simple test command
+                Write-Host "`n[DEBUG] Testing basic resource list command..." -ForegroundColor Magenta
+                $testResult = az resource list --resource-type "Microsoft.OperationalInsights/workspaces" --output table 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[DEBUG] Command succeeded. Raw output:" -ForegroundColor Magenta
+                    Write-Host $testResult -ForegroundColor Gray
+                } else {
+                    Write-Host "[DEBUG] Command failed with exit code: $LASTEXITCODE" -ForegroundColor Magenta
+                }
+            }
+            
             Write-Host "`nOptions:" -ForegroundColor Cyan
             Write-Host "1. Skip log-based alerts (metric alerts only)" -ForegroundColor White
             Write-Host "2. Enter workspace ID manually" -ForegroundColor White
+            Write-Host "3. Run debug mode for troubleshooting (restart with -Debug)" -ForegroundColor Gray
             
-            $choice = Read-Host "`nSelect option (1-2)"
+            $choice = Read-Host "`nSelect option (1-3)"
             
             switch ($choice) {
                 "1" {
@@ -788,6 +976,12 @@ function Get-LogAnalyticsInput {
                     $workspace = Read-Host "Enter Log Analytics workspace resource ID"
                     return $workspace.Trim()
                 }
+                "3" {
+                    Write-Host "[INFO] Please restart the script with the -Debug parameter:" -ForegroundColor Yellow
+                    Write-Host ".\deploy-alerts.ps1 -Interactive -Debug" -ForegroundColor White
+                    Write-Host "This will provide detailed troubleshooting information." -ForegroundColor Gray
+                    return ""
+                }
                 default {
                     Write-Host "[OK] Invalid selection. Skipping log-based alerts." -ForegroundColor Yellow
                     return ""
@@ -795,22 +989,27 @@ function Get-LogAnalyticsInput {
             }
         }
         
-        # Display available workspaces
+        # Display available workspaces grouped by subscription
         Write-Host "`n[LIST] Available Log Analytics Workspaces:" -ForegroundColor Green
         Write-Host "0. Skip log-based alerts (metric alerts only)" -ForegroundColor Gray
         
+        # Group and display workspaces by subscription for better clarity
+        $currentSubName = ""
         for ($i = 0; $i -lt $workspaces.Count; $i++) {
             $workspace = $workspaces[$i]
-            # Extract subscription ID from resource ID
-            $subscriptionId = ""
-            if ($workspace.id -match "/subscriptions/([^/]+)/") {
-                $subscriptionId = $matches[1].Substring(0, 8) + "..."
+            
+            # Show subscription header if it's different from the last one
+            if ($workspace.subscriptionName -ne $currentSubName) {
+                $currentSubName = $workspace.subscriptionName
+                Write-Host "`n  📋 Subscription: $currentSubName" -ForegroundColor Cyan
             }
-            Write-Host "$($i + 1). $($workspace.name) (RG: $($workspace.resourceGroup), Location: $($workspace.location))" -ForegroundColor White
-            Write-Host "   Subscription: $subscriptionId" -ForegroundColor Gray
+            
+            Write-Host "    $($i + 1). $($workspace.name)" -ForegroundColor White
+            Write-Host "       Resource Group: $($workspace.resourceGroup)" -ForegroundColor Gray
+            Write-Host "       Location: $($workspace.location)" -ForegroundColor Gray
         }
         
-        Write-Host "$($workspaces.Count + 1). Enter workspace ID manually" -ForegroundColor White
+        Write-Host "`n$($workspaces.Count + 1). Enter workspace ID manually" -ForegroundColor White
         
         # Get user selection
         $maxChoice = $workspaces.Count + 1
@@ -835,8 +1034,16 @@ function Get-LogAnalyticsInput {
             }
             { $_ -eq ($workspaces.Count + 1) } {
                 Write-Host "`n[INPUT] Manual Entry:" -ForegroundColor Cyan
+                Write-Host "Supports workspaces from any accessible subscription (including different subscription than vWAN resources)" -ForegroundColor Gray
                 Write-Host "Format: /subscriptions/{sub-id}/resourceGroups/{rg-name}/providers/Microsoft.OperationalInsights/workspaces/{workspace-name}" -ForegroundColor Gray
                 $workspace = Read-Host "Enter Log Analytics workspace resource ID"
+                
+                # Validate the manually entered workspace
+                if (![string]::IsNullOrWhiteSpace($workspace)) {
+                    Write-Host "Validating workspace access..." -ForegroundColor Gray
+                    Test-LogAnalyticsWorkspace -WorkspaceId $workspace.Trim() | Out-Null
+                }
+                
                 return $workspace.Trim()
             }
         }
@@ -844,6 +1051,7 @@ function Get-LogAnalyticsInput {
     catch {
         Write-Warning-Log "Failed to discover Log Analytics workspaces: $($_.Exception.Message)"
         Write-Host "`n[INPUT] Manual Entry Required:" -ForegroundColor Yellow
+        Write-Host "Supports workspaces from any accessible subscription (including different subscription than vWAN resources)" -ForegroundColor Gray
         Write-Host "Format: /subscriptions/{sub-id}/resourceGroups/{rg-name}/providers/Microsoft.OperationalInsights/workspaces/{workspace-name}" -ForegroundColor Gray
         $workspace = Read-Host "Enter Log Analytics workspace resource ID (optional, press Enter to skip)"
         
@@ -851,6 +1059,10 @@ function Get-LogAnalyticsInput {
             Write-Warning-Log "Log Analytics workspace not specified. Log-based alerts will be skipped."
             return ""
         }
+        
+        # Validate the manually entered workspace
+        Write-Host "Validating workspace access..." -ForegroundColor Gray
+        Test-LogAnalyticsWorkspace -WorkspaceId $workspace.Trim() | Out-Null
         
         return $workspace.Trim()
     }
@@ -1247,6 +1459,17 @@ function Deploy-ActivityLogAlert {
 function Get-VwanResources {
     param([array]$SubscriptionList)
     
+    # Test Azure CLI connectivity first
+    if (!(Test-AzureCliConnectivity)) {
+        Write-Error-Log "Azure CLI connectivity test failed. Cannot proceed with resource discovery."
+        return @{
+            VirtualHubs = @()
+            VpnGateways = @()
+            ErGateways = @()
+            Firewalls = @()
+        }
+    }
+    
     $script:AllResources = @{
         VirtualHubs = @()
         VpnGateways = @()
@@ -1257,26 +1480,103 @@ function Get-VwanResources {
     foreach ($subscription in $SubscriptionList) {
         Write-Log "Discovering vWAN resources in subscription '$($subscription.name)' ($($subscription.id))..."
         
-        # Set subscription context
-        az account set --subscription $subscription.id
+        # Set subscription context and test connectivity
+        try {
+            Write-Progress -Activity "Discovering vWAN Resources" -Status "Setting subscription context..." -PercentComplete 10
+            az account set --subscription $subscription.id
+            
+            # Quick connectivity test
+            $testResult = az account show --query "id" --output tsv 2>$null
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($testResult)) {
+                Write-Warning-Log "Failed to set subscription context or verify connectivity. Skipping subscription."
+                continue
+            }
+            Write-Log "  Subscription context set successfully"
+        }
+        catch {
+            Write-Warning-Log "Failed to set subscription context: $($_.Exception.Message). Skipping subscription."
+            continue
+        }
         
         try {
             # Get Virtual Hubs
             Write-Log "  Discovering Virtual Hubs..."
             try {
-                $vhubsJson = az network vhub list --subscription $subscription.id --query "[].{id:id, resourceGroup:resourceGroup, location:location, name:name}" --output json 2>$null
-                if ($LASTEXITCODE -eq 0 -and ![string]::IsNullOrEmpty($vhubsJson)) {
-                    $vhubs = $vhubsJson | ConvertFrom-Json
-                    if ($vhubs) {
-                        $script:AllResources.VirtualHubs += $vhubs
-                        Write-Log "    Found $($vhubs.Count) Virtual Hub(s)"
+                Write-Progress -Activity "Discovering vWAN Resources" -Status "Scanning Virtual Hubs in $($subscription.name)..." -PercentComplete 25
+                
+                # Try direct command with better error handling
+                $vhubsJson = $null
+                $startTime = Get-Date
+                
+                try {
+                    # Use Invoke-Expression to better handle potential hanging
+                    $command = "az network vhub list --subscription '$($subscription.id)' --query `"[].{id:id, resourceGroup:resourceGroup, location:location, name:name}`" --output json"
+                    if ($Debug) {
+                        Write-Host "[DEBUG] Running command: $command" -ForegroundColor Magenta
+                    }
+                    $vhubsJson = Invoke-Expression $command 2>$null
+                    $duration = (Get-Date) - $startTime
+                    
+                    if ($Debug) {
+                        Write-Host "[DEBUG] Command completed in $($duration.TotalSeconds.ToString('F1'))s" -ForegroundColor Magenta
+                        Write-Host "[DEBUG] Raw JSON output length: $($vhubsJson.Length) characters" -ForegroundColor Magenta
+                        if (![string]::IsNullOrEmpty($vhubsJson)) {
+                            Write-Host "[DEBUG] First 200 chars of response: $($vhubsJson.Substring(0, [Math]::Min(200, $vhubsJson.Length)))" -ForegroundColor Magenta
+                        }
+                    }
+                    
+                    if ($duration.TotalSeconds -gt 20) {
+                        Write-Warning-Log "    Virtual Hub discovery took $($duration.TotalSeconds.ToString('F1'))s (unexpectedly slow)"
+                    }
+                }
+                catch {
+                    Write-Warning-Log "    Azure CLI command failed: $($_.Exception.Message)"
+                }
+                
+                if (![string]::IsNullOrEmpty($vhubsJson) -and $vhubsJson.Trim() -ne "[]" -and $vhubsJson.Trim() -ne "null") {
+                    try {
+                        $vhubs = $vhubsJson | ConvertFrom-Json
+                        if ($vhubs -and $vhubs.Count -gt 0) {
+                            $script:AllResources.VirtualHubs += $vhubs
+                            Write-Log "    Found $($vhubs.Count) Virtual Hub(s)" -ForegroundColor Green
+                        } else {
+                            Write-Warning-Log "    No Virtual Hubs found (empty result)"
+                        }
+                    }
+                    catch {
+                        Write-Warning-Log "    Failed to parse Virtual Hub JSON response: $($_.Exception.Message)"
                     }
                 } else {
-                    Write-Warning-Log "    No Virtual Hubs found or command failed"
+                    Write-Warning-Log "    No Virtual Hubs found (no data returned)"
+                    
+                    # Try fallback method using simpler query
+                    Write-Log "    Trying fallback discovery method..."
+                    try {
+                        $fallbackJson = az network vhub list --subscription $subscription.id --output json 2>$null
+                        if (![string]::IsNullOrEmpty($fallbackJson) -and $fallbackJson.Trim() -ne "[]") {
+                            $fallbackHubs = $fallbackJson | ConvertFrom-Json
+                            if ($fallbackHubs -and $fallbackHubs.Count -gt 0) {
+                                # Convert to expected format
+                                $convertedHubs = $fallbackHubs | ForEach-Object {
+                                    @{
+                                        id = $_.id
+                                        resourceGroup = $_.resourceGroup
+                                        location = $_.location
+                                        name = $_.name
+                                    }
+                                }
+                                $script:AllResources.VirtualHubs += $convertedHubs
+                                Write-Log "    Fallback method found $($convertedHubs.Count) Virtual Hub(s)" -ForegroundColor Green
+                            }
+                        }
+                    }
+                    catch {
+                        Write-Warning-Log "    Fallback discovery also failed: $($_.Exception.Message)"
+                    }
                 }
             }
             catch {
-                Write-Warning-Log "    Failed to list Virtual Hubs: $($_.Exception.Message)"
+                Write-Warning-Log "    Failed to discover Virtual Hubs: $($_.Exception.Message)"
             }
             
             # Get VPN Gateways
@@ -2078,6 +2378,15 @@ function Main {
                 SubscriptionId = $subscriptions[0].id
                 Notifications = $notifications
                 IsNew = $true
+            }
+        }
+        
+        # Validate Log Analytics workspace if provided
+        if (![string]::IsNullOrEmpty($LogAnalyticsWorkspace)) {
+            Write-Host "`nValidating Log Analytics workspace..." -ForegroundColor Yellow
+            if (-not (Test-LogAnalyticsWorkspace -WorkspaceId $LogAnalyticsWorkspace)) {
+                Write-Host "Warning: Workspace validation failed. Proceeding anyway..." -ForegroundColor Yellow
+                Write-Host "Ensure you have appropriate permissions to the specified workspace." -ForegroundColor Yellow
             }
         }
         
