@@ -287,6 +287,7 @@ Log-based alerts also require:
 # Deploy using parameter file
 az deployment group create `
   --resource-group "rg-vwan-monitoring" `
+  --template-file "services/Network/virtualWans/templates/bicep/VirtualHub-BGPPeerStatus.bicep" `
   --parameters vhub-bgp-alert.bicepparam
 ```
 
