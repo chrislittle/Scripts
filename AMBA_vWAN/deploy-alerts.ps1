@@ -511,16 +511,29 @@ function New-ActionGroup {
         
         # Add email notifications using temporary JSON file
         if ($ActionGroupConfig.Notifications.Emails -and $ActionGroupConfig.Notifications.Emails.Count -gt 0) {
+            if ($Debug) {
+                Write-Host "[DEBUG] Processing emails: $($ActionGroupConfig.Notifications.Emails -join ', ')" -ForegroundColor Magenta
+                Write-Host "[DEBUG] Email count: $($ActionGroupConfig.Notifications.Emails.Count)" -ForegroundColor Magenta
+            }
+            
             $emailReceivers = @()
             for ($i = 0; $i -lt $ActionGroupConfig.Notifications.Emails.Count; $i++) {
                 $email = $ActionGroupConfig.Notifications.Emails[$i]
+                if ($Debug) {
+                    Write-Host "[DEBUG] Processing email $($i + 1): '$email' (length: $($email.Length))" -ForegroundColor Magenta
+                }
                 $emailReceivers += @{
                     name = "email-$($i + 1)"
                     emailAddress = $email
                 }
             }
             $emailJsonFile = Join-Path $tempPath "emails-$(Get-Date -Format 'yyyyMMddHHmmss').json"
-            $emailReceivers | ConvertTo-Json -Depth 3 | Out-File -FilePath $emailJsonFile -Encoding UTF8
+            $emailJson = $emailReceivers | ConvertTo-Json -Depth 3
+            if ($Debug) {
+                Write-Host "[DEBUG] Email JSON content:" -ForegroundColor Magenta
+                Write-Host $emailJson -ForegroundColor Gray
+            }
+            $emailJson | Out-File -FilePath $emailJsonFile -Encoding UTF8
         }
         
         # Add SMS notifications using temporary JSON file
