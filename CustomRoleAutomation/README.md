@@ -252,7 +252,7 @@ Safety features:
 **Interactive mode with safety prompts (recommended for first-time or manual runs):**
 
 ```powershell
-cd .\CustomRoles\Tests
+cd .\Tests
 .\Test-CustomRole.ps1 -Interactive -SafetyPrompts
 ```
 
