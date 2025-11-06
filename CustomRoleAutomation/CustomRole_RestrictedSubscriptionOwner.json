@@ -1,0 +1,52 @@
+{
+  "Name": "Restricted Subscription Owner",
+  "Id": null,
+  "IsCustom": true,
+  "Description": "Custom role based on Subscription Owner with restrictions on networking resources and Azure Policy operations. Provides full access to manage all resources except VNETs, gateways, routing, load balancers, private networking, and policy assignments.",
+  "Actions": [
+    "*"
+  ],
+  "NotActions": [
+    "Microsoft.Authorization/*/write",
+    "Microsoft.Authorization/*/Delete",
+    "Microsoft.Network/vpnGateways/*",
+    "Microsoft.Network/expressRouteCircuits/*",
+    "Microsoft.Network/expressRouteGateways/*",
+    "Microsoft.Network/expressRoutePorts/*",
+    "Microsoft.Network/expressRoutePortsLocations/*",
+    "Microsoft.Network/expressRouteCrossConnections/*",
+    "Microsoft.Network/virtualNetworkGateways/*",
+    "Microsoft.Network/routeTables/*",
+    "Microsoft.Network/virtualNetworks/*",
+    "Microsoft.Network/frontDoors/*",
+    "Microsoft.Network/frontdoorWebApplicationFirewallPolicies/*",
+    "Microsoft.Cdn/profiles/*",
+    "Microsoft.Network/loadBalancers/*",
+    "Microsoft.Network/applicationGateways/*",
+    "Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies/*",
+    "Microsoft.Network/privateEndpoints/*",
+    "Microsoft.Network/privateLinkServices/*",
+    "Microsoft.Network/privateDnsZones/virtualNetworkLinks/*",
+    "Microsoft.Network/natGateways/*",
+    "Microsoft.Network/networkWatchers/*",
+    "Microsoft.Network/networkIntentPolicies/*",
+    "Microsoft.Network/serviceEndpointPolicies/*",
+    "Microsoft.Network/virtualWans/*",
+    "Microsoft.Network/virtualHubs/*",
+    "Microsoft.Network/vpnSites/*",
+    "Microsoft.Network/vpnServerConfigurations/*",
+    "Microsoft.Network/p2sVpnGateways/*",
+    "Microsoft.Network/trafficManagerProfiles/*",
+    "Microsoft.Network/virtualNetworkTaps/*",
+    "Microsoft.Network/azureFirewalls/*",
+    "Microsoft.Network/firewallPolicies/*",
+    "Microsoft.Network/ipGroups/*",
+    "Microsoft.Network/ddosCustomPolicies/*",
+    "Microsoft.Network/ddosProtectionPlans/*"
+  ],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/{subscriptionId}"
+  ]
+}
