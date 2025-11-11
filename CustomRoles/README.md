@@ -27,16 +27,47 @@ This directory contains custom Azure RBAC role definitions designed to provide g
 
 This role provides comprehensive subscription-level administrative access while enforcing strict boundaries around network architecture and policy governance. It follows the Azure Landing Zone principle of policy-driven governance and subscription democratization, allowing application teams to manage their workloads within platform-defined guardrails.
 
-#### Base Permissions
+---
+
+## 🚀 Quick Start - Validate This Role
+
+### Recommended: Interactive mode with safety prompts
+
+```powershell
+cd .\CustomRoles\Tests
+.\Test-CustomRole.ps1 -Interactive -SafetyPrompts
+```
+
+This provides:
+
+- ✅ Interactive menu to select specific test requirements
+- ✅ Y/N confirmations for all destructive operations
+- ✅ Resource provider registration check with prompt to auto-register if needed
+- ✅ Region selection picker (no need to specify `-Location`)
+- ✅ Current subscription auto-detected (no need to specify `-SubscriptionId`)
+
+### For CI/CD pipelines
+
+```powershell
+.\Test-CustomRole.ps1 -SubscriptionId <subId> -Location westus2
+```
+
+📖 **[Full Test Documentation](./Tests/README.md)** - Detailed guide including test architecture, advanced options, and troubleshooting
+
+---
+
+## Role Definition
+
+### Base Permissions
 
 - **Actions:** `*` (all actions, equivalent to Subscription Owner)
 - **Scope:** Subscription level
 
-#### Restrictions (NotActions)
+### Restrictions (NotActions)
 
 The role implements the following restrictions to maintain platform control and security boundaries:
 
-##### 1. Authorization & Governance
+#### 1. Authorization & Governance
 
 - **`Microsoft.Authorization/*/write`** - Blocks creating or modifying:
   - Role assignments
@@ -45,7 +76,7 @@ The role implements the following restrictions to maintain platform control and 
   - Resource locks
 - **`Microsoft.Authorization/*/Delete`** - Blocks deletion of authorization resources
 
-##### 2. Virtual Networks (Requirement #1)
+#### 2. Virtual Networks (Requirement #1)
 
 - **`Microsoft.Network/virtualNetworks/*`** - Blocks all VNET operations including:
   - Creating, modifying, or deleting virtual networks
@@ -54,7 +85,7 @@ The role implements the following restrictions to maintain platform control and 
   - DNS settings
   - Service endpoints within VNETs
 
-##### 3. ExpressRoute & VPN Gateways (Requirement #2)
+#### 3. ExpressRoute & VPN Gateways (Requirement #2)
 
 - **`Microsoft.Network/vpnGateways/*`** - VPN gateways
 - **`Microsoft.Network/expressRouteCircuits/*`** - ExpressRoute circuits
@@ -64,42 +95,42 @@ The role implements the following restrictions to maintain platform control and 
 - **`Microsoft.Network/expressRouteCrossConnections/*`** - ExpressRoute cross-connections
 - **`Microsoft.Network/virtualNetworkGateways/*`** - Virtual network gateways
 
-##### 4. Route Tables (Requirement #3)
+#### 4. Route Tables (Requirement #3)
 
 - **`Microsoft.Network/routeTables/*`** - All route table operations including routes
 
-##### 5. Front Door (Requirement #4)
+#### 5. Front Door (Requirement #4)
 
 - **`Microsoft.Network/frontDoors/*`** - Azure Front Door instances
 - **`Microsoft.Network/frontdoorWebApplicationFirewallPolicies/*`** - Front Door WAF policies
 - **`Microsoft.Cdn/profiles/*`** - CDN profiles (used by Front Door)
 
-##### 6. Load Balancers (Requirement #5)
+#### 6. Load Balancers (Requirement #5)
 
 - **`Microsoft.Network/loadBalancers/*`** - All load balancer types
 - **`Microsoft.Network/applicationGateways/*`** - Application Gateways
 - **`Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies/*`** - Application Gateway WAF policies
 
-##### 7. Private Link & Private Endpoints (Requirement #6)
+#### 7. Private Link & Private Endpoints (Requirement #6)
 
 - **`Microsoft.Network/privateEndpoints/*`** - Private endpoints
 - **`Microsoft.Network/privateLinkServices/*`** - Private link services
 - **`Microsoft.Network/privateDnsZones/virtualNetworkLinks/*`** - Private DNS zone VNET links
 
-##### 8. NAT Gateways (Requirement #7)
+#### 8. NAT Gateways (Requirement #7)
 
 - **`Microsoft.Network/natGateways/*`** - NAT gateway operations
 
-##### 9. Network Watcher Tools (Requirement #8)
+#### 9. Network Watcher Tools (Requirement #8)
 
 - **`Microsoft.Network/networkWatchers/*`** - Network Watcher resources (includes connection monitors)
 
-##### 10. Service Endpoints (Requirement #9)
+#### 10. Service Endpoints (Requirement #9)
 
 - **`Microsoft.Network/serviceEndpointPolicies/*`** - Service endpoint policies
 - **`Microsoft.Network/networkIntentPolicies/*`** - Network intent policies
 
-##### 11. Virtual WAN (Requirement #10)
+#### 11. Virtual WAN (Requirement #10)
 
 - **`Microsoft.Network/virtualWans/*`** - Virtual WAN instances (create-only test)
 - **`Microsoft.Network/virtualHubs/*`** - Virtual hubs (not tested; hard dependency on Virtual WAN)
@@ -107,26 +138,26 @@ The role implements the following restrictions to maintain platform control and 
 - **`Microsoft.Network/vpnServerConfigurations/*`** - VPN server configurations
 - **`Microsoft.Network/p2sVpnGateways/*`** - Point-to-site VPN gateways
 
-##### 12. Traffic Manager (Requirement #11)
+#### 12. Traffic Manager (Requirement #11)
 
 - **`Microsoft.Network/trafficManagerProfiles/*`** - Traffic Manager profiles
 
-##### 13. Virtual Network Tap (Requirement #12)
+#### 13. Virtual Network Tap (Requirement #12)
 
 - **`Microsoft.Network/virtualNetworkTaps/*`** - Virtual network TAP resources
 
-##### 14. Azure Firewall (Requirement #13)
+#### 14. Azure Firewall (Requirement #13)
 
 - **`Microsoft.Network/azureFirewalls/*`** - Azure Firewall instances
 - **`Microsoft.Network/firewallPolicies/*`** - Firewall policies
 - **`Microsoft.Network/ipGroups/*`** - IP groups (used by firewalls)
 
-##### 15. DDoS Protection (Requirement #14)
+#### 15. DDoS Protection (Requirement #14)
 
 - **`Microsoft.Network/ddosCustomPolicies/*`** - DDoS custom policies
 - **`Microsoft.Network/ddosProtectionPlans/*`** - DDoS protection plans
 
-#### Design Rationale
+### Design Rationale
 
 This role follows the **Application Owner** pattern from the Azure Landing Zone accelerator with additional networking restrictions. The design ensures:
 
@@ -135,9 +166,9 @@ This role follows the **Application Owner** pattern from the Azure Landing Zone 
 3. **Least Privilege:** Application teams have full autonomy within their subscription while respecting platform boundaries
 4. **Defense in Depth:** Both write and delete operations are blocked on critical infrastructure
 
-#### Deployment
+### Deployment
 
-##### Prerequisites
+#### Prerequisites
 
 - Azure PowerShell module installed
 - Authenticated to Azure with appropriate permissions to create custom roles
@@ -247,46 +278,11 @@ Safety features:
 - Retry logic on service principal deletion mitigates eventual consistency delays in Azure AD.
 - Resource provider registration validation with optional auto-registration.
 
-#### Recommended Usage
+Additional test execution notes:
 
-**Interactive mode with safety prompts (recommended for first-time or manual runs):**
-
-```powershell
-cd .\Tests
-.\Test-CustomRole.ps1 -Interactive -SafetyPrompts
-```
-
-This combination provides:
-
-- ✅ Interactive menu to select specific test requirements
-- ✅ Y/N confirmations for all destructive operations
-- ✅ Resource provider registration check with prompt to auto-register if needed
-- ✅ Region selection picker (no need to specify `-Location`)
-- ✅ Current subscription auto-detected (no need to specify `-SubscriptionId`)
-
-**Automated/unattended runs (CI/CD):**
-
-```powershell
-Test-CustomRole.ps1 -SubscriptionId <subId> -Location westus2
-```
-
-**Other common scenarios:**
-
-```powershell
-# Specific region, with safety prompts
-Test-CustomRole.ps1 -SubscriptionId <subId> -Location westus2 -SafetyPrompts
-
-# Skip cleanup to inspect test resources
-Test-CustomRole.ps1 -Interactive -SafetyPrompts -SkipCleanup
-```
-
-Interactive region selection:
-
-If you omit `-Location` or pass an empty string (`-Location ""`), the script displays an indexed list of available Azure regions for the current subscription and prompts you to choose.
-
-At completion, Phase 6 invokes `Clear-TestEnvironment` unless `-SkipCleanup` is provided.
-
-Backward compatibility: The previous `Cleanup-TestEnvironment.ps1` was removed; any external automation should update references to `Clear-TestEnvironment.ps1` and the function `Clear-TestEnvironment`.
+- If you omit `-Location` or pass an empty string, the script displays an indexed list of available Azure regions and prompts you to choose.
+- At completion, Phase 6 invokes `Clear-TestEnvironment` unless `-SkipCleanup` is provided.
+- Backward compatibility: The previous `Cleanup-TestEnvironment.ps1` was removed; any external automation should update references to `Clear-TestEnvironment.ps1` and the function `Clear-TestEnvironment`.
 
 #### Skipped / Excluded Tests
 
@@ -317,7 +313,7 @@ Future enhancements under consideration:
 The test harness validates RBAC restrictions across three operation types for most resource categories:
 
 | Requirement | Resource Type | Create | Modify | Delete | Notes |
-|---|---|---|---|---|
+|-------------|---------------|--------|--------|--------|-------|
 | **#1** | Virtual Networks | ✓ | ✓ | ✓ | Full CRUD coverage |
 | | VNET Peering | ✓ | - | - | Single-op test (create blocked) |
 | **#2** | VPN Gateway | ✓ | - | - | Create-only (modify/delete slow to test) |
